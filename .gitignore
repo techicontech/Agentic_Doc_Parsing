@@ -1,0 +1,74 @@
+# Secrets & local env
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+credentials*.json
+secrets/
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.ipynb_checkpoints/
+
+# Node / frontend
+web/node_modules/
+web/dist/
+web/.vite/
+npm-debug.log*
+yarn-error.log*
+
+# Runtime data (never commit manuals or OCR output)
+data/
+artifacts/
+uploads/
+logs/
+*.log
+.tmp/
+tmp/
+cache/
+
+# Large / proprietary manuals
+*.pdf
+*.PDF
+*.djvu
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Model / ML caches
+.cache/
+huggingface/
+torch_extensions/
+*.pt
+*.pth
+*.onnx
+
+# Local docker volumes / dumps
+*.sql.gz
+*.dump
+pgdata/
+minio_data/

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-doc-parsing"
+version = "0.1.0"
+description = "Agentic document parsing for technical manuals — hybrid ingest, grounded retrieval, cited chat"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "Techicon" }]
+keywords = ["docling", "rag", "marine", "manuals", "litellm", "fastapi"]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/techicontech/Agentic_Doc_Parsing"
+
+[tool.setuptools.packages.find]
+where = ["src"]

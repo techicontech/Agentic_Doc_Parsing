@@ -1,0 +1,65 @@
+"""Shared typed models for parsed pages / elements."""
+
+from __future__ import annotations
+
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class Route(str, Enum):
+    DOCLING = "docling"
+    MISTRAL = "mistral"
+    SKIP = "skip"
+
+
+class ElementType(str, Enum):
+    HEADING = "heading"
+    PARAGRAPH = "paragraph"
+    TABLE = "table"
+    FIGURE = "figure"
+    LIST = "list"
+    CAPTION = "caption"
+    OTHER = "other"
+
+
+class ParsedElement(BaseModel):
+    type: ElementType
+    page: int
+    text: str | None = None
+    bbox: list[float] | None = None
+    table_json: dict[str, Any] | list[Any] | None = None
+    figure_id: str | None = None
+    caption: str | None = None
+    confidence: float | None = None
+    extractor_name: str
+    extractor_version: str
+
+
+class ParsedPage(BaseModel):
+    page: int  # 1-based
+    route: Route
+    elements: list[ParsedElement] = Field(default_factory=list)
+    page_image_png: bytes | None = None
+    notes: dict[str, Any] = Field(default_factory=dict)
+
+
+class SectionDraft(BaseModel):
+    path: list[str]
+    title: str
+    page_start: int | None = None
+    page_end: int | None = None
+    doc_code: str | None = None
+    edition: str | None = None
+    section_kind: str = "other"
+    parent_path: list[str] | None = None
+
+
+class PageClassification(BaseModel):
+    page: int  # 1-based
+    route: Route
+    char_count: int = 0
+    image_count: int = 0
+    drawing_count: int = 0
+    reason: str = ""
