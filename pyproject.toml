@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentic-doc-parsing"
-version = "0.1.0"
-description = "Agentic document parsing for technical manuals — hybrid ingest, grounded retrieval, cited chat"
+version = "0.2.0"
+description = "Agentic document parsing for technical manuals — hybrid ingest, vectorless retrieval, cited chat"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Proprietary" }

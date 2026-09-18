@@ -27,7 +27,11 @@ Edit `.env` — see [configuration.md](configuration.md).
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+# Windows
+.\.venv\Scripts\activate
+# macOS / Linux
+source .venv/bin/activate
+
 pip install -r requirements.txt
 pip install -e .
 ```
@@ -59,7 +63,7 @@ Create database/user matching `.env`, then:
 python scripts/init_db.py
 ```
 
-Optional wipe:
+Optional wipe of **tables** (not the schema files):
 
 ```bash
 python scripts/reset_db.py --yes
@@ -67,17 +71,28 @@ python scripts/reset_db.py --yes
 
 ### 6. Services
 
+Two terminals from the repo root:
+
 ```bash
 python scripts/run_api.py
-cd web && npm install && npm run dev
 ```
 
-- API: http://127.0.0.1:8000  
-- UI: http://127.0.0.1:5173  
+```bash
+cd web
+npm install
+npm run dev
+```
+
+- API: http://127.0.0.1:8000
+- UI: http://127.0.0.1:5173
+- Swagger: http://127.0.0.1:8000/docs
+
+Restarting these processes does **not** delete ingested data.
 
 ## Ingest notes
 
-- Full manuals (500+ pages) can take a long time on CPU; GPU strongly preferred.
+- Full manuals (500+ pages) take a long time on CPU; GPU is strongly preferred.
+- UI upload **replaces** the previous corpus, then ingests the new PDF.
 - Progress is written to `logs/` (gitignored).
 - Uploaded PDFs stay in `uploads/` (gitignored) — never commit OEM manuals.
 
@@ -85,11 +100,12 @@ cd web && npm install && npm run dev
 
 | Symptom | Check |
 |---------|--------|
-| LiteLLM 403 | Wrong `LITELLM_API_KEY` or model not enabled on proxy |
+| LiteLLM 403 | Wrong `LITELLM_API_KEY` or model not enabled on the proxy |
 | OCR 504 / missing Mistral | Use `OCR_BACKEND=claude` or configure Mistral on the proxy |
 | Docling slow / CPU | Install CUDA torch; set `DOCLING_DEVICE=cuda` |
 | Chat abstains wrongly | Usually retrieval ranking — see [retrieval.md](retrieval.md); **not** a re-ingest unless OCR text is wrong |
-| Empty fleet / no data | Run ingest to completion; confirm `init_db` + MinIO healthy |
+| Empty fleet / no data | Finish ingest; confirm `init_db` + MinIO healthy |
+| Sibling plate in the diagram strip | Question named the wrong plate in a contrast clause; ranking strips those identifiers from the positive clause |
 
 ## Security
 

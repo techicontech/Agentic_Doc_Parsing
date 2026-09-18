@@ -99,7 +99,7 @@ export default function App() {
       const data = await api("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, equipment: "S50MC-C" }),
+        body: JSON.stringify({ message }),
       });
       setMessages((prev) => [
         ...prev,
@@ -109,6 +109,8 @@ export default function App() {
           abstained: data.abstained,
           citations: data.citations || [],
           diagrams: data.diagrams || [],
+          retrieval_notes: data.retrieval_notes || {},
+          verification: data.verification || {},
         },
       ]);
     } catch (err) {
@@ -185,6 +187,22 @@ export default function App() {
             <div className="role">{m.role === "user" ? "You" : "Assistant"}</div>
             <div className="content">{m.content}</div>
 
+            {m.retrieval_notes?.paths_fired?.length > 0 && (
+              <div className="paths">
+                Paths: {(m.retrieval_notes.paths_fired || []).join(" · ")}
+                {m.retrieval_notes.fusion_method ? ` · ${m.retrieval_notes.fusion_method}` : ""}
+                {m.retrieval_notes.exact_identifier_hits
+                  ? ` · ${m.retrieval_notes.exact_identifier_hits} exact-code hit(s)`
+                  : ""}
+                {m.retrieval_notes.panels_pulled
+                  ? ` · ${m.retrieval_notes.panels_pulled} step panel(s)`
+                  : ""}
+                {m.retrieval_notes.cross_refs_resolved
+                  ? ` · ${m.retrieval_notes.cross_refs_resolved} cross-ref hop(s)`
+                  : ""}
+              </div>
+            )}
+
             {m.diagrams?.length > 0 && (
               <div className="diagrams">
                 <div className="section-label">Diagrams</div>
@@ -195,7 +213,9 @@ export default function App() {
                         <img src={d.url} alt={d.label || `page ${d.page}`} loading="lazy" />
                       </a>
                       <figcaption>
-                        {d.label || d.doc_code || "figure"} · p.{d.page}
+                        {d.label || "panel"}
+                        {d.step ? ` · step ${d.step}` : ""}
+                        {d.ref ? ` · ${d.ref}` : ""}
                       </figcaption>
                     </figure>
                   ))}
@@ -209,9 +229,14 @@ export default function App() {
                 <ul>
                   {m.citations.slice(0, 5).map((c, i) => (
                     <li key={i}>
-                      p.{c.page}
-                      {c.doc_code ? ` · ${c.doc_code}` : ""}
-                      {c.section?.length ? ` · ${c.section.join(" > ")}` : ""}
+                      <span className="cite-ref">{c.ref || `page ${c.page}`}</span>
+                      {c.component ? ` · ${c.component}` : ""}
+                      {c.action ? ` · ${c.action}` : ""}
+                      <span className="cite-page">
+                        {c.page_printed ? ` · printed p.${c.page_printed}` : ""}
+                        {` · pdf p.${c.page}`}
+                        {c.step ? ` · step ${c.step}` : ""}
+                      </span>
                     </li>
                   ))}
                 </ul>

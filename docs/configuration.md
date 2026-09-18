@@ -12,6 +12,9 @@ Copy `.env.example` → `.env` and fill in values. All settings are read via `ma
 | `OCR_BACKEND` | `claude` \| `mistral` \| `skip` | `claude` |
 | `OCR_VISION_MODEL` | Vision model for diagram OCR | `claude-haiku` |
 | `MISTRAL_OCR_MODEL` | Used only if `OCR_BACKEND=mistral` | `mistral/mistral-ocr-latest` |
+| `AGENTIC_ENABLED` | Use the agentic chat pipeline | `true` |
+| `PAGE_ROUTER_LLM_ENABLED` | Page-router agent on ambiguous pages | `true` |
+| `PAGE_ROUTER_LLM_MAX_PAGES` | Cap on router escalations per ingest | `60` |
 
 ## Docling
 
@@ -19,6 +22,7 @@ Copy `.env.example` → `.env` and fill in values. All settings are read via `ma
 |----------|-------------|---------|
 | `DOCLING_ENABLED` | Enable Docling parse path | `true` |
 | `DOCLING_DEVICE` | `cuda` \| `cpu` \| `auto` | `cuda` |
+| `DOCLING_BATCH_SIZE` | Pages per Docling batch | `10` |
 
 ## PostgreSQL
 
@@ -43,5 +47,15 @@ Copy `.env.example` → `.env` and fill in values. All settings are read via `ma
 ## Notes
 
 - Dev defaults in `.env.example` are for local only — change passwords before any shared deployment.
-- The UI and API both expect the same Postgres + MinIO instance that ingest wrote to.
-- Restart API/UI after changing `.env`; **re-ingest only** if parse/OCR settings or the PDF changed.
+- UI and API must share the same Postgres + MinIO instance that ingest wrote to.
+- Restart API/UI after changing `.env`. **Re-ingest only** if parse/OCR settings or the PDF changed.
+
+## Schema migrations
+
+`scripts/init_db.py` applies, in order:
+
+1. `sql/001_schema.sql` — only if `manuals` is missing
+2. `sql/002_milestone2.sql` — procedure/plate/edition/panel columns (idempotent)
+3. `sql/003_generic_citations.sql` — `citation_convention`, `citation_key`, `citation_fields` + backfill (idempotent)
+
+Clearing the corpus from the UI and re-uploading a PDF rebuilds knowledge rows against the current schema; it does not drop the schema itself.

@@ -165,18 +165,22 @@ def _elements_from_docling(exported: dict, pages_1based: list[int]) -> list[Pars
             )
         )
 
+    # Figures themselves come from panel geometry (see marine_docs.panels), which
+    # resolves the multiple independently coded panels per page. Docling picture
+    # items only contribute their caption text here.
     for item in pictures:
         page = _page_from_prov(item, remap_page)
         if page is None or page not in by_page:
             continue
         caption = item.get("text") or item.get("caption") or None
+        if not (caption or "").strip():
+            continue
         by_page[page].elements.append(
             ParsedElement(
-                type=ElementType.FIGURE,
+                type=ElementType.CAPTION,
                 page=page,
                 text=caption,
                 caption=caption,
-                figure_id=f"docling-fig-p{page}",
                 bbox=_bbox_from_prov(item),
                 extractor_name="docling",
                 extractor_version=DOCLING_VERSION,

@@ -4,38 +4,44 @@ Base URL (dev): `http://127.0.0.1:8000`
 
 Interactive docs: `http://127.0.0.1:8000/docs` (FastAPI Swagger).
 
+The React UI talks only to these routes (Vite proxies `/api` in dev).
+
 ## Health / status
 
-### `GET /status`
+### `GET /api/health`
 
-Ingest and corpus readiness (whether data is present, last job progress).
+Corpus readiness, current ingest job snippet, OCR/LiteLLM readiness.
+
+### `GET /api/ingest/status`
+
+Full ingest job: `status` (`idle` | `running` | `completed` | `failed`), `stage`, `percent`, `message`, `has_data`, `log_file`.
 
 ## Ingest
 
-### `POST /upload`
+### `POST /api/ingest/upload`
 
-Multipart upload of a PDF. Stores under `uploads/` and returns a path/id for ingest.
+Multipart PDF upload. Saves under `uploads/`, **clears any previous corpus**, then starts ingest on a background thread.
 
-### `POST /ingest`
+Returns 409 if ingest is already running.
 
-Start (or resume) ingest for the uploaded manual. Body/query may include options such as clear-previous.
-
-### `GET /ingest/progress`
-
-Percent complete and phase (classify / Docling / OCR / knowledge build). Mirrored in UI and `logs/`.
+Progress is polled via `/api/ingest/status`. File logs go under `logs/` (gitignored).
 
 ## Chat
 
-### `POST /ask`
+### `POST /api/chat`
+
+Blocked with 409 while ingest is running, and 400 if no corpus exists.
 
 ```json
 {
-  "query": "What is the cylinder liner bore diameter?",
-  "equipment_context": "S50MC-C"
+  "message": "What is the cylinder liner bore diameter?",
+  "equipment": "S50MC-C"
 }
 ```
 
-Response (shape):
+`equipment` is optional; blank uses the ingested fleet model.
+
+Response shape:
 
 ```json
 {
@@ -43,37 +49,71 @@ Response (shape):
   "abstained": false,
   "citations": [
     {
-      "manual": "...",
-      "page": 73,
+      "manual": "…",
+      "ref": "Procedure 903-1.1 Edition 0286",
+      "procedure_no": "903-1.1",
+      "plate_no": null,
+      "citation_key": "903-1.1",
+      "edition": "0286",
       "doc_code": "D10301",
-      "section": "Chapter 903 > Cylinder Liner"
+      "page_printed": "1",
+      "page": 73,
+      "section": ["Chapter 903", "Cylinder Liner"],
+      "component": "Cylinder Liner",
+      "action": "Data",
+      "drawing_code": null,
+      "step": null,
+      "rule": "exact_identifier",
+      "snippet": "..."
     }
   ],
   "diagrams": [
     {
-      "page": 65,
-      "url": "/figures/...",
-      "label": "..."
+      "label": "M90201-0285D06",
+      "ref": "Procedure 902-1.2 Edition 0286",
+      "page": 38,
+      "panel_index": 2,
+      "step": 5,
+      "url": "/api/figures?key=..."
     }
   ],
-  "verification": { "passed": true, "checks": {} },
-  "retrieval_notes": {}
+  "verification": {
+    "passed": true,
+    "checks": {
+      "equipment": true,
+      "revision": true,
+      "condition": true,
+      "units": true,
+      "scope": true,
+      "conflicts": true
+    },
+    "failed": [],
+    "details": {}
+  },
+  "retrieval_notes": {
+    "paths_fired": ["lexical", "structural", "visual"],
+    "fusion_method": "rrf",
+    "orchestration": "deterministic_pipeline_with_adk_agents"
+  }
 }
 ```
 
-When verification fails, `abstained` is `true` and `answer` explains what evidence was missing.
+`ref` / `citation_key` is the primary citation — the reference the manual asks readers to quote. `page` (PDF) and `page_printed` are supplementary. `rule` records which ranking rule brought an element into evidence.
+
+When verification fails, `abstained` is `true`, `verification.failed` lists the failing checks, and `answer` explains what was missing. The answer model is not called.
 
 ## Figures
 
-Figure URLs returned in chat point at API/MinIO-backed paths served for the UI diagram strip.
+### `GET /api/figures?key=...`
+
+PNG bytes from MinIO for the chat diagram strip. Keys come from `diagrams[].url`.
 
 ## CLI helpers
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/run_api.py` | Start uvicorn |
+| `scripts/run_api.py` | FastAPI on `:8000` |
 | `scripts/run_ingest.py` | CLI ingest |
-| `scripts/init_db.py` | Apply schema |
-| `scripts/reset_db.py` | Wipe tables (destructive) |
-| `scripts/ask.py` | One-shot ask from terminal |
-| `scripts/run_ui.py` | Optional Gradio/legacy UI launcher |
+| `scripts/init_db.py` | Apply `sql/001`–`003` + MinIO bucket |
+| `scripts/reset_db.py` | Wipe tables (destructive, `--yes`) |
+| `scripts/ask.py` | One-shot ask on the same chat path |

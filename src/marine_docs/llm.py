@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 
 def configure_litellm() -> None:
     settings = get_settings()
+    # LiteLLM's logger inherits our root DEBUG level and prints every request body.
+    os.environ.setdefault("LITELLM_LOG", "ERROR")
+    for name in ("LiteLLM", "LiteLLM Proxy", "LiteLLM Router"):
+        logging.getLogger(name).setLevel(logging.WARNING)
     if settings.litellm_api_base:
         os.environ["LITELLM_API_BASE"] = _normalize_api_base(settings.litellm_api_base)
     if settings.litellm_api_key:

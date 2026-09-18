@@ -37,6 +37,12 @@ def main() -> int:
     else:
         print("Schema already present")
 
+    for extra in ("002_milestone2.sql", "003_generic_citations.sql"):
+        path = ROOT / "sql" / extra
+        if path.exists():
+            print(f"Applying {extra}...")
+            execute_sql_file(str(path))
+
     bucket = ensure_bucket()
     print(f"MinIO bucket ready: {bucket}")
     print("Done.")

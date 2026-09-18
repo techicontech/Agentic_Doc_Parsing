@@ -24,7 +24,7 @@ from marine_docs.retrieval import get_fleet_context
 logger = logging.getLogger(__name__)
 
 _LOG_PATH = setup_logging()
-progress_log(f"Full logs → {_LOG_PATH}")
+progress_log(f"Full logs -> {_LOG_PATH}")
 
 app = FastAPI(title="Marine Docs Chat API", version="0.2.0")
 
@@ -69,7 +69,7 @@ def _safe_filename(name: str) -> str:
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
-    equipment: str = "S50MC-C"
+    equipment: str | None = None
 
 
 class ChatApiResponse(BaseModel):
@@ -95,6 +95,7 @@ def health() -> dict[str, Any]:
         "has_data": status.get("has_data"),
         "manual": (fleet or {}).get("title"),
         "ocr_ready": status.get("ocr_ready"),
+        "agentic": True,
         "job": job,
     }
 
@@ -107,7 +108,7 @@ def chat(req: ChatRequest) -> ChatApiResponse:
     if not status.get("has_data"):
         raise HTTPException(status_code=400, detail="No manual ingested yet. Upload a PDF first.")
     try:
-        resp = answer_query(req.message.strip(), equipment_context=req.equipment or "S50MC-C")
+        resp = answer_query(req.message.strip(), equipment_context=req.equipment or None)
     except Exception as exc:
         logger.exception("chat failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc

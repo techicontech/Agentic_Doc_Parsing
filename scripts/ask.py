@@ -17,10 +17,10 @@ from marine_docs.chat import answer_query
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("query", nargs="+")
-    p.add_argument("--equipment", default="S50MC-C")
+    p.add_argument("--equipment", default="", help="Optional equipment id; blank uses the ingested fleet model")
     args = p.parse_args()
     q = " ".join(args.query)
-    resp = answer_query(q, equipment_context=args.equipment)
+    resp = answer_query(q, equipment_context=args.equipment or None)
     print(resp.answer)
     print("\n--- citations ---")
     print(json.dumps(resp.citations, indent=2, default=str))

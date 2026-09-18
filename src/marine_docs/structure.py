@@ -8,6 +8,7 @@ from collections import defaultdict
 import fitz
 
 from marine_docs.models import SectionDraft
+from marine_docs.pagemeta import PageMeta, scan_page
 
 QUOTE_RE = re.compile(
     r"quote\s+(?:Procedure|Data|Plate|Maintenance Schedules)\s+"
@@ -28,14 +29,73 @@ KIND_MAP = {
 }
 
 
-def extract_sections(pdf_path: str) -> list[SectionDraft]:
+def _kind_from_code_or_title(code: str | None, title: str) -> str:
+    if code:
+        mapped = KIND_MAP.get(code[0].upper())
+        if mapped:
+            return mapped
+    t = (title or "").lower()
+    if re.search(r"\b(data|spec(?:ification)?s?|limits?|clearances?)\b", t):
+        return "data"
+    if re.search(
+        r"\b(procedure|checking|inspection|dismantl\w*|mounting|overhaul|removal|replacement)\b",
+        t,
+    ):
+        return "procedure"
+    if re.search(r"\b(plate|drawing|figure)\b", t):
+        return "plate"
+    return "other"
+
+
+def extract_sections(pdf_path: str, convention=None) -> list[SectionDraft]:
     doc = fitz.open(pdf_path)
     try:
         chapter_sections = _sections_from_toc(doc)
-        page_codes = _scan_page_codes(doc)
-        return _merge_sections(chapter_sections, page_codes, doc.page_count)
+        page_metas = {
+            i + 1: scan_page(doc[i], i + 1, convention=convention)
+            for i in range(doc.page_count)
+        }
+        page_codes = {
+            page: {"doc_code": m.doc_code, "edition": m.edition, "kind": m.kind}
+            for page, m in page_metas.items()
+            if m.doc_code
+        }
+        sections = _merge_sections(chapter_sections, page_codes, doc.page_count)
+        _attach_citation_keys(sections, page_metas)
+        return sections
     finally:
         doc.close()
+
+
+def _attach_citation_keys(
+    sections: list[SectionDraft],
+    page_metas: dict[int, PageMeta],
+) -> None:
+    """Copy procedure/plate keys and header titles from the section's own pages.
+
+    A section spans several procedure numbers (M90201 covers 902-1.2 and 902-1.4),
+    so the section keeps the first one it opens with; elements carry their own
+    page-exact value for citation and ranking.
+    """
+    for section in sections:
+        start = section.page_start or 0
+        end = section.page_end or start
+        for page in range(start, end + 1):
+            meta = page_metas.get(page)
+            if not meta:
+                continue
+            if not section.procedure_no and meta.procedure_no:
+                section.procedure_no = meta.procedure_no
+            if not section.plate_no and meta.plate_no:
+                section.plate_no = meta.plate_no
+            if not section.component_title and meta.component_title:
+                section.component_title = meta.component_title
+            if not section.action_title and meta.action_title:
+                section.action_title = meta.action_title
+            if not section.edition and meta.edition:
+                section.edition = meta.edition
+            if not section.citation_key and meta.citation_key:
+                section.citation_key = meta.citation_key
 
 
 def _sections_from_toc(doc: fitz.Document) -> list[SectionDraft]:
@@ -64,13 +124,12 @@ def _sections_from_toc(doc: fitz.Document) -> list[SectionDraft]:
         doc_code = None
         edition = None
         section_title = clean
-        kind = "other"
         m = TOC_CODE_RE.match(clean)
-        if m and m.group("code")[0] in KIND_MAP:
+        if m and m.group("code")[0].upper() in KIND_MAP:
             doc_code = m.group("code")
             edition = m.group("edition")
             section_title = (m.group("title") or clean).strip(" -_\t") or clean
-            kind = KIND_MAP[doc_code[0]]
+        kind = _kind_from_code_or_title(doc_code, section_title)
 
         path = [current_chapter, section_title] if current_chapter else [section_title]
         chapters.append(
@@ -96,7 +155,7 @@ def _scan_page_codes(doc: fitz.Document) -> dict[int, dict]:
             continue
         code = m.group("code").strip()
         edition = m.group("edition").strip()
-        kind = KIND_MAP.get(code[0], "other")
+        kind = _kind_from_code_or_title(code, code)
         found[i + 1] = {"doc_code": code, "edition": edition, "kind": kind}
     return found
 
@@ -182,18 +241,17 @@ def _is_junk_bookmark(title: str) -> bool:
     lower = title.lower()
     return (
         ".pdf" in lower
-        or lower.startswith("d:\\")
-        or lower.startswith("c:\\")
-        or ("\\" in title and "MAN" in title)
+        or bool(re.match(r"^[a-z]:\\", lower))
+        or title.count("\\") >= 2
+        or title.count("/") >= 3
     )
 
 
 def _chapter_name_from_path(title: str) -> str | None:
-    m = re.search(r"(\d{3})_vol2", title, re.IGNORECASE)
+    m = re.search(r"(\d{3})_vol\d", title, re.IGNORECASE)
     if m:
         return f"Chapter {m.group(1)}"
-    if "vol2" in title.lower():
-        m = re.search(r"(\d{3})", title)
-        if m:
-            return f"Chapter {m.group(1)}"
+    m = re.search(r"chapter\s+(\d{1,3})", title, re.IGNORECASE)
+    if m:
+        return f"Chapter {m.group(1)}"
     return None

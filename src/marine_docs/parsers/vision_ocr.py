@@ -1,32 +1,63 @@
-"""Vision OCR via Claude on LiteLLM proxy (no Mistral key needed)."""
+"""
+Agent: Diagram/plate OCR + captioning (ingest-time vision)
+
+Input: PNG bytes of a whole page or one cropped panel, plus a text prompt.
+Output: markdown text (and parsed DRAWING_CODE / STEP lines for panels).
+  Downstream persist turns this into ParsedPage / ParsedElement records.
+Model: settings.ocr_vision_model via LiteLLM (default claude-haiku). Overridable.
+Failure mode: on LLM error the caller retries; if still failing the page is
+  stored as an image-only figure rather than inventing OCR text.
+
+Panel detection itself is geometric (marine_docs.panels) — this agent interprets
+the cropped image. Layout boxes, not numbering format, decide what a panel is.
+"""
 
 from __future__ import annotations
 
-import base64
 import logging
+import re
 import time
+from dataclasses import dataclass
 from typing import Any, Callable
 
 import fitz
 
+from marine_docs.agents import llm_agents
 from marine_docs.config import get_settings
-from marine_docs.llm import chat_completion
 from marine_docs.models import ElementType, ParsedElement, ParsedPage, Route
 
 logger = logging.getLogger(__name__)
 
-EXTRACTOR_NAME = "litellm_vision_ocr"
-EXTRACTOR_VERSION = "claude-vision"
+EXTRACTOR_NAME = "vision_ocr_agent"
+EXTRACTOR_VERSION = "adk-litellm-vision"
 
 ProgressCb = Callable[[str, dict[str, Any]], None]
 
-_PROMPT = (
-    "You are OCR for a marine technical manual page (diagrams, plates, tables). "
-    "Extract ALL readable text exactly. Preserve labels, part numbers, codes, "
-    "dimensions, and table structure in markdown. "
-    "If a region is a drawing with callouts, list each callout number and its label. "
-    "Do not invent text. Reply with markdown only."
-)
+_PAGE_PROMPT = "Extract every readable element of this manual page."
+
+_PANEL_PROMPT = """This image is ONE diagram panel cropped from a marine engine manual.
+Extract:
+1. The drawing code printed on the panel border (example: M90201-0285D06).
+2. The procedure step number this panel illustrates, if visible.
+3. Every callout number and its label, plus any dimensions.
+
+Start with exactly these two lines when you can read them:
+DRAWING_CODE: <code or UNKNOWN>
+STEP: <integer or UNKNOWN>
+
+Then the rest as markdown. Never invent text."""
+
+_DRAWING_LINE = re.compile(r"^DRAWING_CODE:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
+_STEP_LINE = re.compile(r"^STEP:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
+_DRAWING_IN_TEXT = re.compile(r"\b([A-Z]{1,3}\d{3,6}-\d{3,5}[A-Z]?\d{0,3})\b")
+
+
+@dataclass
+class PanelOcr:
+    text: str
+    drawing_code: str | None
+    linked_step_number: int | None
+    caption: str | None
 
 
 def parse_pages_with_vision(
@@ -34,6 +65,7 @@ def parse_pages_with_vision(
     pages_1based: list[int],
     progress: ProgressCb | None = None,
 ) -> list[ParsedPage]:
+    """Whole-page vision OCR — fallback when panel geometry cannot split the page."""
     settings = get_settings()
     if not (settings.litellm_api_base and settings.litellm_api_key):
         raise RuntimeError("Set LITELLM_API_BASE + LITELLM_API_KEY for Claude vision OCR.")
@@ -44,9 +76,8 @@ def parse_pages_with_vision(
 
     for idx, page_no in enumerate(pages_1based, start=1):
         png = _render_page_png(pdf_path, page_no)
-        data_url = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
         try:
-            text = _vision_ocr_with_retry(model, data_url)
+            text = _vision_ocr_with_retry(png, _PAGE_PROMPT)
             elements: list[ParsedElement] = []
             if text.strip():
                 elements.append(
@@ -74,17 +105,17 @@ def parse_pages_with_vision(
                     route=Route.MISTRAL,
                     elements=elements,
                     page_image_png=png,
-                    notes={"via": "claude_vision", "model": model},
+                    notes={"via": "vision_ocr_agent", "model": model, "mode": "full_page"},
                 )
             )
         except Exception:
-            logger.exception("Claude vision OCR failed on page %s", page_no)
+            logger.exception("Vision OCR agent failed on page %s", page_no)
             results.append(
                 ParsedPage(
                     page=page_no,
                     route=Route.MISTRAL,
                     page_image_png=png,
-                    notes={"error": "claude_vision_ocr_failed", "model": model},
+                    notes={"error": "vision_ocr_agent_failed", "model": model, "mode": "full_page"},
                     elements=[
                         ParsedElement(
                             type=ElementType.FIGURE,
@@ -102,20 +133,47 @@ def parse_pages_with_vision(
     return results
 
 
-def _vision_ocr_with_retry(model: str, data_url: str, attempts: int = 3) -> str:
+def ocr_panel_png(png: bytes) -> PanelOcr:
+    """Vision OCR one geometrically cropped panel."""
+    text = _vision_ocr_with_retry(png, _PANEL_PROMPT)
+    return parse_panel_ocr(text)
+
+
+def parse_panel_ocr(text: str) -> PanelOcr:
+    drawing: str | None = None
+    step: int | None = None
+    match = _DRAWING_LINE.search(text or "")
+    if match:
+        value = match.group(1).strip()
+        if value.upper() not in {"UNKNOWN", "NONE", "N/A", "-", ""}:
+            drawing = value[:120]
+    match = _STEP_LINE.search(text or "")
+    if match:
+        digits = re.search(r"\d+", match.group(1))
+        if digits:
+            step = int(digits.group(0))
+    if not drawing:
+        found = _DRAWING_IN_TEXT.search(text or "")
+        if found:
+            drawing = found.group(1)
+    return PanelOcr(
+        text=(text or "").strip(),
+        drawing_code=drawing,
+        linked_step_number=step,
+        caption=_first_line(text),
+    )
+
+
+def _vision_ocr_with_retry(png: bytes, prompt: str, attempts: int = 3) -> str:
     last_exc: Exception | None = None
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": _PROMPT},
-                {"type": "image_url", "image_url": {"url": data_url}},
-            ],
-        }
-    ]
     for i in range(attempts):
         try:
-            return chat_completion(messages, model=model, temperature=0.0, max_tokens=2500)
+            return llm_agents.ask(
+                llm_agents.VISION_OCR,
+                prompt,
+                image_png=png,
+                max_tokens=2500,
+            )
         except Exception as exc:
             last_exc = exc
             logger.warning("vision OCR attempt %s/%s failed: %s", i + 1, attempts, exc)
@@ -137,7 +195,10 @@ def _render_page_png(pdf_path: str, page_1based: int, zoom: float = 1.5) -> byte
 
 def _first_line(text: str) -> str | None:
     for line in (text or "").splitlines():
-        line = line.strip().lstrip("#").strip()
-        if line:
-            return line[:240]
+        stripped = line.strip().lstrip("#").strip()
+        if not stripped:
+            continue
+        if stripped.upper().startswith(("DRAWING_CODE:", "STEP:")):
+            continue
+        return stripped[:240]
     return None

@@ -17,6 +17,11 @@ _NOISY = (
     "urllib3",
     "openai",
     "litellm",
+    # LiteLLM's own loggers are capitalised and attach their own handlers.
+    "LiteLLM",
+    "LiteLLM Proxy",
+    "LiteLLM Router",
+    "google_adk",
     "transformers",
     "torch",
     "PIL",
@@ -81,7 +86,7 @@ def setup_logging(*, console_level: int = logging.WARNING) -> Path:
     access = logging.getLogger("uvicorn.access")
     access.addFilter(_StatusPollFilter())
 
-    logging.getLogger(__name__).info("Full logs → %s", log_path)
+    logging.getLogger(__name__).info("Full logs -> %s", log_path)
     return log_path
 
 

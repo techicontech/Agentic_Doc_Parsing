@@ -82,14 +82,16 @@ def corpus_status() -> dict[str, Any]:
 def clear_corpus() -> dict[str, Any]:
     """Drop knowledge tables and recreate schema; clear MinIO figure objects."""
     root = Path(__file__).resolve().parents[2]
-    schema = root / "sql" / "001_schema.sql"
 
     with connect() as conn:
         with conn.cursor() as cur:
             for t in TABLES:
                 cur.execute(f"DROP TABLE IF EXISTS {t} CASCADE")
         conn.commit()
-    execute_sql_file(str(schema))
+    for migration in sorted((root / "sql").glob("0*.sql")):
+        if "sanity" in migration.name:
+            continue
+        execute_sql_file(str(migration))
 
     deleted_objects = _clear_minio_prefix("manuals/")
     return {"cleared": True, "minio_objects_deleted": deleted_objects}

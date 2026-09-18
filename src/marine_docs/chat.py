@@ -25,20 +25,54 @@ class ChatResponse:
     retrieval_notes: dict[str, Any] = field(default_factory=dict)
 
 
-SYSTEM_PROMPT = """You are a marine technical manual assistant for MAN B&W engine maintenance docs.
+SYSTEM_PROMPT = """You are a technical manual assistant for ingested maintenance documents.
 You help with specs, procedures, troubleshooting, diagrams, and any question answerable from the evidence.
 Answer ONLY from the provided evidence. If evidence is insufficient, say you cannot verify.
-Always include citations as: Manual, page, section path, doc_code when available.
+Cite the manual's own reference: Procedure or Plate number with its Edition. Printed and
+PDF page numbers are supplementary context, never the primary citation.
 Be precise with numbers, units, and procedure steps. Do not invent values.
-If diagrams/plates are listed in evidence, mention them so the user can inspect the images."""
+If diagrams/plates are listed in evidence, mention them so the user can inspect the images.
+
+Reading rules that apply to any manual:
+- A value written as N above/below a named reference (adjustment sheet, recorded value,
+  as-fitted, original) is a delta, not an absolute clearance or limit.
+- When both a numeric data sheet and a checking procedure for the same component are
+  in evidence, apply the procedure if/then first. A limits table alone is not the full decision.
+- Unmarked checklist boxes are not requirements; only ticked/selected items apply.
+- If two numeric values for the same quantity disagree, report both with citations.
+- Arithmetic honesty: never say A exceeds B if A is less than B. If a measured
+  value is below an inspect/replace threshold, do not apply the exceeded-branch
+  action. Do not feed a measurement into a check that uses a different quantity.
+- If a criteria table maps a measurement band to a replacement type, that mapping
+  is the decision. A clearance stated as N above/below a named reference is a
+  delta: compare N only to the procedure's delta threshold, not to min/max bands.
+- Unmarked checklist lines are not required; do not copy ticks across components.
+  Read only the checklist under the citation for the component that was asked about.
+- If evidence equates two names, they are the same item. Do not invert that.
+- Do not abstain when the measured value is below a threshold — that is keep/OK.
+- Apply the if/then list row whose band contains the stated measurement.
+- Prefer the component whose title shares the most words with the question. A
+  shared table-row code on a different component is not the source.
+- Quote the named plate/drawing and its OCR callouts; a sibling plate is not the diagram.
+"""
 
 
 def answer_query(
     query: str,
     *,
-    equipment_context: str | None = "S50MC-C",
+    equipment_context: str | None = None,
     log: bool = True,
 ) -> ChatResponse:
+    try:
+        from marine_docs.config import get_settings
+        from marine_docs.agents.runner import run_agentic_query
+
+        if get_settings().agentic_enabled:
+            return run_agentic_query(
+                query, equipment_context=equipment_context, log=log
+            )
+    except Exception:
+        logger.exception("Agentic pipeline failed; using Milestone-1 retrieve")
     retrieval = retrieve(query)
     verification = verify(query, retrieval, query_equipment=equipment_context)
 
@@ -56,6 +90,7 @@ def answer_query(
                 "checks": verification.checks,
                 "failed": verification.failed,
                 "reason": verification.reason,
+                "details": verification.details,
             },
             retrieval_notes=retrieval.notes,
         )
@@ -79,7 +114,12 @@ def answer_query(
             abstained=False,
             citations=citations,
             diagrams=diagrams,
-            verification={"passed": True, "checks": verification.checks, "failed": []},
+            verification={
+                "passed": True,
+                "checks": verification.checks,
+                "failed": [],
+                "details": verification.details,
+            },
             retrieval_notes=retrieval.notes,
         )
         if log:
@@ -97,6 +137,14 @@ def answer_query(
             )
         )
 
+    conflict_note = ""
+    if verification.details.get("conflicts"):
+        conflict_note = (
+            "\nNumeric values in evidence disagree: "
+            + "; ".join(verification.details["conflicts"][:6])
+            + ". Report each value with its citation.\n"
+        )
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
@@ -106,7 +154,7 @@ def answer_query(
                 f"Manual: {retrieval.manual_title} ({retrieval.revision})\n\n"
                 f"Question: {query}\n\n"
                 f"Evidence:\n{evidence_blob}\n"
-                f"{diagram_note}\n\n"
+                f"{diagram_note}{conflict_note}\n"
                 "Write a concise cited answer. Mention relevant diagrams by page/doc_code."
             ),
         },
@@ -122,7 +170,12 @@ def answer_query(
         abstained=False,
         citations=citations,
         diagrams=diagrams,
-        verification={"passed": True, "checks": verification.checks, "failed": []},
+        verification={
+            "passed": True,
+            "checks": verification.checks,
+            "failed": [],
+            "details": verification.details,
+        },
         retrieval_notes=retrieval.notes,
     )
     if log:
@@ -131,15 +184,23 @@ def answer_query(
 
 
 def _citation(ev, retrieval: RetrievalResult) -> dict[str, Any]:
+    """Procedure/plate code first; page numbers are supplementary (spec §6.1)."""
     return {
         "manual": retrieval.manual_title,
-        "revision": retrieval.revision,
+        "ref": ev.citation_ref,
+        "procedure_no": ev.procedure_no,
+        "plate_no": ev.plate_no,
+        "edition": ev.edition,
+        "doc_code": ev.doc_code,
+        "page_printed": ev.page_number_printed,
         "page": ev.page,
         "section": ev.section_path,
-        "doc_code": ev.doc_code,
-        "edition": ev.edition,
+        "component": ev.component_title,
+        "action": ev.action_title,
+        "panel_index": ev.panel_index,
+        "drawing_code": ev.drawing_code,
+        "step": ev.linked_step_number,
         "source": ev.source,
-        "figure": ev.figure_label,
         "image_path": ev.figure_image_path,
         "snippet": (ev.text or "")[:240],
     }
@@ -157,9 +218,11 @@ def _diagrams(retrieval: RetrievalResult) -> list[dict[str, Any]]:
         seen.add(key)
         out.append(
             {
-                "label": ev.figure_label or ev.doc_code or f"page-{ev.page}",
+                "label": ev.drawing_code or ev.figure_label or ev.citation_ref,
+                "ref": ev.citation_ref,
                 "page": ev.page,
-                "doc_code": ev.doc_code,
+                "panel_index": ev.panel_index,
+                "step": ev.linked_step_number,
                 "section": " > ".join(ev.section_path or []),
                 "image_path": key,
                 "url": f"/api/figures?key={quote(key, safe='')}",
@@ -172,10 +235,10 @@ def _format_evidence(retrieval: RetrievalResult) -> str:
     parts = []
     for i, ev in enumerate(retrieval.evidences[:8], 1):
         path = " > ".join(ev.section_path or [])
-        fig = f" figure={ev.figure_label}" if ev.figure_image_path else ""
+        fig = f" drawing={ev.drawing_code}" if ev.figure_image_path else ""
         parts.append(
-            f"[{i}] page={ev.page} doc_code={ev.doc_code} kind={ev.section_kind} "
-            f"path={path} source={ev.source}{fig}\n{ev.text}"
+            f"[{i}] {ev.citation_ref} | kind={ev.section_kind} | {path} "
+            f"| printed page={ev.page_number_printed or '-'} | pdf page={ev.page}{fig}\n{ev.text}"
         )
     return "\n\n".join(parts)
 

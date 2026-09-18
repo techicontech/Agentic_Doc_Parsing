@@ -19,6 +19,7 @@ class ElementType(str, Enum):
     PARAGRAPH = "paragraph"
     TABLE = "table"
     FIGURE = "figure"
+    PLATE = "plate"
     LIST = "list"
     CAPTION = "caption"
     OTHER = "other"
@@ -35,6 +36,12 @@ class ParsedElement(BaseModel):
     confidence: float | None = None
     extractor_name: str
     extractor_version: str
+    # Panel-level figure fields (spec §6.2); None for text elements.
+    panel_index: int | None = None
+    drawing_code: str | None = None
+    linked_step_number: int | None = None
+    # Cropped panel image, uploaded to MinIO at persist time.
+    image_png: bytes | None = None
 
 
 class ParsedPage(BaseModel):
@@ -54,6 +61,11 @@ class SectionDraft(BaseModel):
     edition: str | None = None
     section_kind: str = "other"
     parent_path: list[str] | None = None
+    procedure_no: str | None = None
+    plate_no: str | None = None
+    component_title: str | None = None
+    action_title: str | None = None
+    citation_key: str | None = None
 
 
 class PageClassification(BaseModel):

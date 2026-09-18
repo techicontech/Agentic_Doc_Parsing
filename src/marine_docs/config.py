@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     # skip = store page images only for diagram pages
     ocr_backend: str = Field(default="claude", alias="OCR_BACKEND")
     ocr_vision_model: str = Field(default="claude-haiku", alias="OCR_VISION_MODEL")
+    agentic_enabled: bool = Field(default=True, alias="AGENTIC_ENABLED")
+    # Ingest page router: heuristic first, LLM only on genuinely ambiguous pages.
+    page_router_llm_enabled: bool = Field(default=True, alias="PAGE_ROUTER_LLM_ENABLED")
+    page_router_llm_max_pages: int = Field(default=60, alias="PAGE_ROUTER_LLM_MAX_PAGES")
     docling_device: str = Field(default="auto", alias="DOCLING_DEVICE")
     docling_batch_size: int = Field(default=10, alias="DOCLING_BATCH_SIZE")
 
